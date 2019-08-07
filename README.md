@@ -1,4 +1,4 @@
-# Partioner
+# Partitioner
 
 ## Descrition
 
