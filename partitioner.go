@@ -1,74 +1,92 @@
 package partitioner
 
 import (
-	"bytes"
-	"io"
+	"context"
 	"fmt"
+	"io/ioutil"
+	"net/http"
+	"sync"
+	"time"
 )
 
-// Message is the content which Partitioner receive as input
-// and redirects to correspondent client
-type Message struct {
-	id string
-	headers map[string]string
-	body []byte
+// Partitioner represents an instance which controls
+// the distribution of massages to clients
+type Partitioner struct {
+	mtx     *sync.Mutex
+	clients map[int]*Client
+	Input   chan Message
+	server  *http.Server
 }
 
-// ID returns the id of Message (used for partitioning)
-func(m *Message) ID() (id string) {
-	return m.id
-}
+func (p Partitioner) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path == "connect" && r.Method == http.MethodPost {
+		b, err := ioutil.ReadAll(r.Body)
+		defer r.Body.Close()
+		if err != nil {
 
-// Body returns a io.Reader to the content body's Message
-func(m *Message) Body() (body io.Reader) {
-	return bytes.NewReader(m.body)
-}
-
-func NewMessage(id string, headers map[string]string, body []byte) (message Message) {
-	message = Message{
-		id: id, 
-		headers: headers, 
-		body: body,
-	}
-
-	return message
-}
-
-// Client represents a client's binding
-type Client struct {
-	id int
-	buffer chan<- Message
-	callback func(Message) error
-}
-
-// Connect connects a stream input (channel) to the buffer of client
-func(c *Client) Connect(input <-chan Message) (err error) {
-	if input == nil {
-		return fmt.Errorf("Input channel can not be nil")
-	}
-	
-	if c.buffer == nil {
-		return fmt.Errorf("Client not configured")
-	}
-
-	go func() {
-		for m := range input {
-			c.buffer <- m
 		}
-	}()
+		p.addClient(context.Background(), string(b))
+	}
+}
+
+// addClient adds a new Client to the instance
+func (p *Partitioner) addClient(ctx context.Context, webhookURL string) error {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+
+	// for now this will be setted here,
+	// but the consumer of Partitioner should say whats he want to do
+	cb := func(m Message) error {
+		r, errCb := http.NewRequest("POST", webhookURL, m.Body())
+		if errCb != nil {
+			return errCb
+		}
+
+		r.Header.Set("x-partitioner-id", string(m.ID()))
+
+		for _, k := range m.headers {
+			r.Header.Set(fmt.Sprintf("x-partitioner-%s", k), m.headers[k])
+		}
+
+		ctxCb, cancel := context.WithTimeout(r.Context(), time.Millisecond*50)
+		defer cancel()
+
+		r = r.WithContext(ctxCb)
+
+		_, errCb = http.DefaultClient.Do(r)
+		if errCb != nil {
+			return errCb
+		}
+
+		return nil
+	}
+
+	newID := len(p.clients) + 1
+	c, err := NewClient(ctx, newID, p.Input, cb)
+	if err != nil {
+		return err
+	}
+	p.clients[c.id] = &c
 
 	return nil
 }
 
-// Key is the association of a Client with a partition key
-type Key struct { 
-	id string
-	client *Client
-}
+func NewPartitioner(addr string, inputCallback func(chan<- Message) error) (*Partitioner, error) {
+	var partitioner Partitioner
+	partitioner.Input = make(chan Message, 1)
 
-// Partitioner represents an instance which controls 
-// the distribution of massages to clients
-type Partitioner struct {
-	clients map[int]*Client
-	keys map[string]*Key
+	partitioner.server = &http.Server{
+		Addr:           addr,
+		Handler:        partitioner,
+		ReadTimeout:    10 * time.Second,
+		WriteTimeout:   10 * time.Second,
+		MaxHeaderBytes: 1 << 20,
+	}
+
+	err := partitioner.server.ListenAndServe()
+	if err != nil {
+
+	}
+
+	return &partitioner, nil
 }
