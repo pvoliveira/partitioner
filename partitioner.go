@@ -2,91 +2,68 @@ package partitioner
 
 import (
 	"context"
-	"fmt"
-	"io/ioutil"
-	"net/http"
+	"errors"
+	"strings"
 	"sync"
-	"time"
 )
 
 // Partitioner represents an instance which controls
 // the distribution of massages to clients
 type Partitioner struct {
+	clients map[int]*client
+	input   chan Message
+	keys 	map[string]*client
 	mtx     *sync.Mutex
-	clients map[int]*Client
-	Input   chan Message
-	server  *http.Server
 }
 
-func (p Partitioner) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.URL.Path == "connect" && r.Method == http.MethodPost {
-		b, err := ioutil.ReadAll(r.Body)
-		defer r.Body.Close()
-		if err != nil {
-
-		}
-		p.addClient(context.Background(), string(b))
-	}
-}
-
-// addClient adds a new Client to the instance
-func (p *Partitioner) addClient(ctx context.Context, webhookURL string) error {
+// AddClient adds a new Client to the instance
+func (p Partitioner) AddClient(ctx context.Context, callback func(Message) error) error {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 
-	// for now this will be setted here,
-	// but the consumer of Partitioner should say whats he want to do
-	cb := func(m Message) error {
-		r, errCb := http.NewRequest("POST", webhookURL, m.Body())
-		if errCb != nil {
-			return errCb
-		}
-
-		r.Header.Set("x-partitioner-id", string(m.ID()))
-
-		for _, k := range m.headers {
-			r.Header.Set(fmt.Sprintf("x-partitioner-%s", k), m.headers[k])
-		}
-
-		ctxCb, cancel := context.WithTimeout(r.Context(), time.Millisecond*50)
-		defer cancel()
-
-		r = r.WithContext(ctxCb)
-
-		_, errCb = http.DefaultClient.Do(r)
-		if errCb != nil {
-			return errCb
-		}
-
-		return nil
-	}
-
 	newID := len(p.clients) + 1
-	c, err := NewClient(ctx, newID, p.Input, cb)
+	c, err := newClient(newID, callback)
 	if err != nil {
 		return err
 	}
-	p.clients[c.id] = &c
+	p.clients[c.id] = c
 
 	return nil
 }
 
-func NewPartitioner(addr string, inputCallback func(chan<- Message) error) (*Partitioner, error) {
+// IncomeMessage sends to Partitioner's stream a new message to redistribute
+func (p Partitioner) IncomeMessage(message Message) error {
+	if strings.TrimSpace(message.id) == "" {
+		return errors.New("Id is required")
+	}
+	p.input <- message
+	return nil
+}
+
+func (p Partitioner) routeMessage(message Message) {
+	p.mtx.Lock()
+	defer p.mtx.Unlock()
+
+	// TODO: algorithm to route the messages to clients
+}
+
+// NewPartitioner returns a new instance of Partitioner
+func NewPartitioner(ctx context.Context) (Partitioner, error) {
 	var partitioner Partitioner
-	partitioner.Input = make(chan Message, 1)
+	partitioner.input = make(chan Message, 1)
 
-	partitioner.server = &http.Server{
-		Addr:           addr,
-		Handler:        partitioner,
-		ReadTimeout:    10 * time.Second,
-		WriteTimeout:   10 * time.Second,
-		MaxHeaderBytes: 1 << 20,
-	}
+	go func(innerCtx context.Context, p *Partitioner) {
+		defer close(p.input)
 
-	err := partitioner.server.ListenAndServe()
-	if err != nil {
+		for {
+			select {
+			case m := <-p.input:
+				p.routeMessage(m)
+			case <-innerCtx.Done():
+				return
+			}
+		}
+	}(ctx, &partitioner)
 
-	}
-
-	return &partitioner, nil
+	return partitioner, nil
 }

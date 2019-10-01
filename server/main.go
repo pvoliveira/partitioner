@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/pvoliveira/partitioner/src"
+	"github.com/pvoliveira/partitioner"
 )
 
 func main() {
