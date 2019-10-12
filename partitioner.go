@@ -3,6 +3,7 @@ package partitioner
 import (
 	"context"
 	"errors"
+	"math/rand"
 	"strings"
 	"sync"
 )
@@ -12,8 +13,8 @@ import (
 type Partitioner struct {
 	clients map[int]*client
 	input   chan Message
-	keys 	map[string]*client
-	mtx     *sync.Mutex
+	keys 	map[string]int
+	mtx     sync.Mutex
 }
 
 // AddClient adds a new Client to the instance
@@ -26,7 +27,7 @@ func (p Partitioner) AddClient(ctx context.Context, callback func(Message) error
 	if err != nil {
 		return err
 	}
-	p.clients[c.id] = c
+	p.clients[c.id] = &c
 
 	return nil
 }
@@ -44,13 +45,24 @@ func (p Partitioner) routeMessage(message Message) {
 	p.mtx.Lock()
 	defer p.mtx.Unlock()
 
-	// TODO: algorithm to route the messages to clients
+	clientID, ok := p.keys[message.ID()]
+	if ok {
+		p.clients[clientID].callback(message)
+		return
+	}
+	
+	id := rand.Intn(len(p.clients) - 1)
+
+	p.keys[message.ID()] = id
+	p.clients[id].callback(message)
 }
 
 // NewPartitioner returns a new instance of Partitioner
 func NewPartitioner(ctx context.Context) (Partitioner, error) {
 	var partitioner Partitioner
+	partitioner.clients = make(map[int]*client)
 	partitioner.input = make(chan Message, 1)
+	partitioner.keys = make(map[string]int)
 
 	go func(innerCtx context.Context, p *Partitioner) {
 		defer close(p.input)

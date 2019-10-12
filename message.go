@@ -25,6 +25,11 @@ func (m Message) Body() io.Reader {
 	return bytes.NewReader(m.body)
 }
 
+// Headers returns a map for the headers associated with the message
+func (m Message) Headers() map[string]string {
+	return m.headers
+}
+
 // NewMessage builds a Message
 func NewMessage(id string, headers map[string]string, body []byte) (Message, error) {
 	if strings.TrimSpace(id) == "" {
