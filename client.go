@@ -11,10 +11,10 @@ type client struct {
 }
 
 // newClient returns a new instance of a Client
-func newClient(id int, callback func(m Message) error) (client, error) {
-	var c client
+func newClient(id int, callback func(m Message) error) (*client, error) {
+	c := new(client)
 	if callback == nil {
-		return c, errors.New("Callback must be passed")
+		return nil, errors.New("Callback must be passed")
 	}
 
 	c.id = id
