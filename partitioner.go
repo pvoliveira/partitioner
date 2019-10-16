@@ -32,8 +32,8 @@ func (p *Partitioner) AddClient(ctx context.Context, callback func(Message) erro
 	return nil
 }
 
-// IncomeMessage sends to Partitioner's stream a new message to redistribute
-func (p *Partitioner) IncomeMessage(message Message) error {
+// Dispatch sends to Partitioner's stream a new message to redistribute
+func (p *Partitioner) Dispatch(message Message) error {
 	if strings.TrimSpace(message.id) == "" {
 		return errors.New("Id is required")
 	}
@@ -50,20 +50,13 @@ func (p *Partitioner) routeMessage(message Message) {
 	}
 
 	clientID, ok := p.keys[message.ID()]
-	if ok {
-		p.clients[clientID].callback(message)
-		return
+
+	if t := len(p.clients); t > 1 && !ok {
+		clientID = rand.Intn(t)
+		p.keys[message.ID()] = clientID
 	}
 
-	var id int
-
-	if t := len(p.clients); t > 1 {
-		id = rand.Intn(t)
-	}
-
-	p.keys[message.ID()] = id
-
-	p.clients[id].callback(message)
+	p.clients[clientID].callback(message)
 }
 
 // NewPartitioner returns a new instance of Partitioner

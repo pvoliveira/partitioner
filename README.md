@@ -8,3 +8,11 @@ Thus the idea behind _partioner_ is to build a tool to make easier and lighter a
 - an instance controls the partitioning of messages
 - the partitioning is made by a key that is associated to a client when configuration refresh
 - the association of keys to clients is maintained by the instance (the sharing of configuration between instances was not considerate for a first version)
+
+
+[ ] Base API
+[ ] Base Server
+[ ] Base Client
+[ ] HTTP Server
+[ ] HTTP Client
+[ ] Consul

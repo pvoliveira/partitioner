@@ -37,7 +37,7 @@ func TestIncomeMessage(t *testing.T) {
 
 	m, err := NewMessage("1", nil, []byte("test"))
 
-	err = p.IncomeMessage(m)
+	err = p.Dispatch(m)
 	if err != nil {
 		t.Error(err)
 		return
@@ -92,12 +92,12 @@ func TestIncomeMessageMultipleClients(t *testing.T) {
 			return
 		}
 
-		err = p.IncomeMessage(m)
+		err = p.Dispatch(m)
 		if err != nil {
 			t.Error(err)
 			return
 		}
 	}
 
-	<-time.After(time.Millisecond * 2000)
+	<-time.After(time.Millisecond * 100)
 }
